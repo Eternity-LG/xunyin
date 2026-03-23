@@ -28,7 +28,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QDialog, QLineEdit, QFormLayout,
     QCheckBox, QGroupBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, QPoint
+from PyQt6.QtGui import QPainter, QColor, QRadialGradient, QFont, QPen
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
@@ -384,56 +385,75 @@ class XunYinWindow(QMainWindow):
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("准备就绪，按住圆形按钮开始录音")
         
+        # 初始化录音状态
+        self.is_recording = False
+        
+        # 创建悬浮窗指示器
+        self.floating_indicator = FloatingIndicator(self)
+        self.floating_indicator.set_status("idle")
+        self.floating_indicator.show()
+        
         # 启动全局热键监听
         self.start_global_hotkey_listener()
         
     def start_global_hotkey_listener(self):
         """启动全局热键监听"""
-        self.global_mouse_listener = None
         self.is_recording_by_hotkey = False
+        
+        print(f"启动鼠标监听，当前快捷键配置: {self.config.get('record_hotkey', 'F6')}")
         
         def on_mouse_click(x, y, button, pressed):
             """监听鼠标侧键"""
-            record_hotkey = self.config.get("record_hotkey", "F6")
-            
-            # 检查是否是配置的鼠标快捷键
-            if record_hotkey == "MouseBack" and button == mouse.Button.x1:
-                if pressed:
-                    self.is_recording_by_hotkey = True
-                    self.start_recording()
-                else:
-                    if self.is_recording_by_hotkey:
-                        self.is_recording_by_hotkey = False
-                        self.stop_recording()
-                return True
-            elif record_hotkey == "MouseForward" and button == mouse.Button.x2:
-                if pressed:
-                    self.is_recording_by_hotkey = True
-                    self.start_recording()
-                else:
-                    if self.is_recording_by_hotkey:
-                        self.is_recording_by_hotkey = False
-                        self.stop_recording()
-                return True
+            try:
+                # 检查是否暂停（设置对话框打开时）
+                if hasattr(self, 'pause_global_listener') and self.pause_global_listener:
+                    return True
+                    
+                record_hotkey = self.config.get("record_hotkey", "F6")
+                
+                # 调试输出
+                if button in (mouse.Button.x1, mouse.Button.x2):
+                    print(f"鼠标事件: button={button}, pressed={pressed}, 配置={record_hotkey}")
+                
+                # 检查是否是配置的鼠标快捷键
+                if record_hotkey == "MouseBack" and button == mouse.Button.x1:
+                    print(f"检测到后退键: pressed={pressed}")
+                    if pressed:
+                        self.is_recording_by_hotkey = True
+                        # 直接调用，QTimer可能导致问题
+                        self.start_recording()
+                    else:
+                        if self.is_recording_by_hotkey:
+                            self.is_recording_by_hotkey = False
+                            self.stop_recording()
+                    return True
+                elif record_hotkey == "MouseForward" and button == mouse.Button.x2:
+                    print(f"检测到前进键: pressed={pressed}")
+                    if pressed:
+                        self.is_recording_by_hotkey = True
+                        self.start_recording()
+                    else:
+                        if self.is_recording_by_hotkey:
+                            self.is_recording_by_hotkey = False
+                            self.stop_recording()
+                    return True
+            except Exception as e:
+                print(f"鼠标监听错误: {e}")
             return True
             
         def on_mouse_scroll(x, y, dx, dy):
             """监听鼠标滚轮"""
-            record_hotkey = self.config.get("record_hotkey", "F6")
-            
-            if record_hotkey == "MouseScrollUp" and dy > 0:
-                # 滚轮作为开关（非长按）
-                if not self.is_recording:
-                    self.start_recording()
-                else:
-                    self.stop_recording()
-                return True
-            elif record_hotkey == "MouseScrollDown" and dy < 0:
-                if not self.is_recording:
-                    self.start_recording()
-                else:
-                    self.stop_recording()
-                return True
+            try:
+                record_hotkey = self.config.get("record_hotkey", "F6")
+                
+                if record_hotkey == "MouseScrollUp" and dy > 0:
+                    QTimer.singleShot(0, lambda: self.toggle_recording())
+                    return True
+                elif record_hotkey == "MouseScrollDown" and dy < 0:
+                    QTimer.singleShot(0, lambda: self.toggle_recording())
+                    return True
+            except Exception as e:
+                print(f"滚轮监听错误: {e}")
             return True
             
         self.global_mouse_listener = MouseListener(
@@ -441,6 +461,13 @@ class XunYinWindow(QMainWindow):
             on_scroll=on_mouse_scroll
         )
         self.global_mouse_listener.start()
+        
+    def toggle_recording(self):
+        """切换录音状态"""
+        if self.is_recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
         
     def stop_global_hotkey_listener(self):
         """停止全局热键监听"""
@@ -451,6 +478,8 @@ class XunYinWindow(QMainWindow):
     def closeEvent(self, event):
         """窗口关闭时清理"""
         self.stop_global_hotkey_listener()
+        if hasattr(self, 'floating_indicator'):
+            self.floating_indicator.close()
         if hasattr(self, 'worker') and self.worker:
             self.worker.stop()
             self.worker.wait()
@@ -696,6 +725,124 @@ class XunYinWindow(QMainWindow):
                 pass
                 
         event.accept()
+
+
+class FloatingIndicator(QWidget):
+    """圆形悬浮窗 - 录音状态指示器"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(50, 50)
+        
+        self.status = "idle"  # idle, recording, finished
+        self.wave_phase = 0  # 音波动画相位
+        
+        # 动画定时器
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self.update_animation)
+        self.anim_timer.start(50)  # 20fps
+        
+        # 自动隐藏定时器（完成状态）
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(lambda: self.set_status("idle"))
+        
+        # 位置：屏幕右下角
+        screen = QApplication.primaryScreen().geometry()
+        self.move(screen.width() - 70, screen.height() - 70)
+        
+    def set_status(self, status):
+        """设置状态: idle(就绪), recording(录音中), finished(完成)"""
+        self.status = status
+        self.update()
+        self.show()
+        self.raise_()  # 确保在最上层
+        
+        if status == "finished":
+            # 2秒后恢复就绪状态
+            self.hide_timer.start(2000)
+        else:
+            self.hide_timer.stop()
+            
+    def update_animation(self):
+        """更新动画"""
+        if self.status == "recording":
+            self.wave_phase += 0.3
+            self.update()
+            
+    def paintEvent(self, event):
+        """绘制圆形"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # 根据状态选择颜色：蓝色(就绪) -> 红色(录音) -> 绿色(完成)
+        if self.status == "recording":
+            # 红色录音状态
+            base_color = QColor(244, 67, 54)  # #f44336
+            glow_color = QColor(255, 100, 100)
+        elif self.status == "finished":
+            # 绿色完成状态
+            base_color = QColor(76, 175, 80)  # #4CAF50
+            glow_color = QColor(100, 220, 100)
+        else:
+            # 蓝色就绪状态
+            base_color = QColor(33, 150, 243)  # #2196F3
+            glow_color = QColor(100, 181, 246)
+            
+        # 绘制圆形
+        painter.setPen(Qt.PenStyle.NoPen)
+        
+        # 外发光
+        for i in range(3, 0, -1):
+            alpha = 40 - i * 10
+            glow = QColor(glow_color)
+            glow.setAlpha(alpha)
+            painter.setBrush(glow)
+            painter.drawEllipse(25 - 20 - i, 25 - 20 - i, 40 + i*2, 40 + i*2)
+        
+        # 主体渐变
+        gradient = QRadialGradient(25, 25, 20)
+        gradient.setColorAt(0, glow_color)
+        gradient.setColorAt(0.7, base_color)
+        gradient.setColorAt(1, QColor(base_color.red() - 30, base_color.green() - 30, base_color.blue() - 30))
+        painter.setBrush(gradient)
+        
+        # 绘制圆形主体
+        painter.drawEllipse(5, 5, 40, 40)
+        
+        # 绘制音波动画（录音状态）
+        if self.status == "recording":
+            painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
+            center_x, center_y = 25, 25
+            
+            # 多层音波
+            for i in range(3):
+                radius = 10 + i * 5 + int(3 * (1 + (self.wave_phase + i) % 6) / 6)
+                alpha = int(150 * (1 - (radius - 10) / 25))
+                wave_color = QColor(255, 255, 255, alpha)
+                painter.setPen(QPen(wave_color, 1.5))
+                painter.drawEllipse(center_x - radius//2, center_y - radius//2, radius, radius)
+                
+            # 中心脉冲
+            pulse = int(2 + 3 * (1 + (self.wave_phase * 2) % 10) / 10)
+            painter.setBrush(QColor(255, 255, 255, 180))
+            painter.drawEllipse(center_x - pulse//2, center_y - pulse//2, pulse, pulse)
+        
+    def mousePressEvent(self, event):
+        """拖动悬浮窗"""
+        self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        event.accept()
+        
+    def mouseMoveEvent(self, event):
+        """拖动悬浮窗"""
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
 
 
 class HotkeyLineEdit(QLineEdit):
