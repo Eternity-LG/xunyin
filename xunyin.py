@@ -107,7 +107,7 @@ class TranscriptionWorker(QThread):
             
             # 加载模型并转写
             model = whisper.load_model(self.model_name)
-            result = model.transcribe(audio_data, language="zh")
+            result = model.transcribe(audio_data, language="zh", initial_prompt="请使用简体中文回答。")
             text = result["text"].strip()
             self.finished.emit(text)
         except Exception as e:
