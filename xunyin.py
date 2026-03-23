@@ -730,13 +730,15 @@ class XunYinWindow(QMainWindow):
 class FloatingIndicator(QWidget):
     """圆形悬浮窗 - 录音状态指示器"""
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(None)  # 不设置父窗口，独立窗口
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowDoesNotAcceptFocus  # 不获取焦点
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # 显示时不激活
         self.setFixedSize(50, 50)
         
         self.status = "idle"  # idle, recording, finished
