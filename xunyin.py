@@ -533,10 +533,6 @@ class XunYinWindow(QMainWindow):
         self.record_btn.setEnabled(False)
         self.status_bar.showMessage("正在识别，请稍候...")
         
-        # 更新悬浮窗状态为完成（绿色）
-        if hasattr(self, 'floating_indicator') and self.floating_indicator:
-            self.floating_indicator.set_status("finished")
-        
         # 停止录音并获取文件路径
         self.temp_file = self.recorder.stop_recording()
         
@@ -553,6 +549,10 @@ class XunYinWindow(QMainWindow):
         self.text_output.clear()
         self.text_output.setPlainText(text)
         self.text_output.repaint()  # 强制刷新
+
+        # Update floating indicator to finished (green)
+        if hasattr(self, 'floating_indicator') and self.floating_indicator:
+            self.floating_indicator.set_status("finished")
         self.status_bar.showMessage("识别完成！")
         self.record_btn.setEnabled(True)
         
