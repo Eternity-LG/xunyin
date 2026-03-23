@@ -22,7 +22,8 @@ from scipy import signal
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QComboBox, QStatusBar,
-    QMessageBox, QFileDialog, QDialog
+    QMessageBox, QFileDialog, QDialog, QLineEdit, QFormLayout,
+    QCheckBox, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -200,9 +201,9 @@ class XunYinWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("迅音 - 语音转文字")
-        self.setGeometry(100, 100, 400, 500)
-        self.setMinimumSize(400, 500)
-        self.setMaximumSize(400, 500)
+        self.setGeometry(100, 100, 400, 350)
+        self.setMinimumSize(400, 350)
+        self.setMaximumSize(400, 350)
         
         # 加载配置
         self.config = load_config()
@@ -251,24 +252,41 @@ class XunYinWindow(QMainWindow):
         top_layout.addWidget(model_label)
         top_layout.addWidget(self.model_combo)
         
+        # 设置按钮
+        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn.setFixedSize(32, 32)
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.settings_btn.clicked.connect(self.open_settings)
+        top_layout.addWidget(self.settings_btn)
+        
         layout.addLayout(top_layout)
         
         # === 中间区域：录音按钮（圆形大按钮） ===
         btn_container = QWidget()
-        btn_container.setFixedHeight(120)
+        btn_container.setFixedHeight(70)
         btn_layout_center = QVBoxLayout(btn_container)
         btn_layout_center.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.record_btn = QPushButton("按住说话")
-        self.record_btn.setFixedSize(100, 100)
+        self.record_btn.setFixedSize(50, 50)
         self.record_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
-                font-size: 14px;
+                font-size: 11px;
                 font-weight: bold;
                 border: none;
-                border-radius: 50px;
+                border-radius: 25px;
             }
             QPushButton:pressed {
                 background-color: #f44336;
@@ -295,7 +313,7 @@ class XunYinWindow(QMainWindow):
                 background-color: #f9f9f9;
             }
         """)
-        self.text_output.setMinimumHeight(150)
+        self.text_output.setMinimumHeight(80)
         layout.addWidget(self.text_output)
         
         # === 底部按钮区域 ===
@@ -361,6 +379,22 @@ class XunYinWindow(QMainWindow):
         # === 状态栏 ===
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("准备就绪，按住圆形按钮开始录音")
+        
+    def apply_config(self):
+        """应用配置"""
+        # 应用自动复制设置
+        auto_copy = self.config.get("auto_copy", True)
+        self.status_bar.showMessage(f"设置已更新 (自动复制: {'开启' if auto_copy else '关闭'})")
+        
+    def open_settings(self):
+        """打开设置对话框"""
+        dialog = SettingsDialog(self.config, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 保存新配置
+            self.config = dialog.get_config()
+            ConfigManager.save(self.config)
+            # 应用新配置
+            self.apply_config()
         
     def start_recording(self):
         """开始录音"""
@@ -586,6 +620,83 @@ class XunYinWindow(QMainWindow):
                 pass
                 
         event.accept()
+
+
+class SettingsDialog(QDialog):
+    """设置对话框"""
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config.copy()
+        self.setWindowTitle("设置")
+        self.setGeometry(100, 100, 400, 300)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """设置UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # === 快捷键设置 ===
+        hotkey_group = QGroupBox("快捷键设置")
+        hotkey_layout = QFormLayout(hotkey_group)
+        
+        # 录音快捷键
+        self.record_hotkey = QLineEdit()
+        self.record_hotkey.setText(self.config.get("record_hotkey", "F6"))
+        self.record_hotkey.setPlaceholderText("例如: F6, Ctrl+Space")
+        hotkey_layout.addRow("录音快捷键:", self.record_hotkey)
+        
+        # 复制快捷键
+        self.copy_hotkey = QLineEdit()
+        self.copy_hotkey.setText(self.config.get("copy_hotkey", "Ctrl+C"))
+        self.copy_hotkey.setPlaceholderText("例如: Ctrl+C, F7")
+        hotkey_layout.addRow("复制结果快捷键:", self.copy_hotkey)
+        
+        layout.addWidget(hotkey_group)
+        
+        # === 其他设置 ===
+        other_group = QGroupBox("其他设置")
+        other_layout = QVBoxLayout(other_group)
+        
+        # 自动复制开关
+        self.auto_copy = QCheckBox("识别完成后自动复制到剪贴板")
+        self.auto_copy.setChecked(self.config.get("auto_copy", True))
+        other_layout.addWidget(self.auto_copy)
+        
+        # 自动保存开关
+        self.auto_save = QCheckBox("识别完成后自动保存到文件")
+        self.auto_save.setChecked(self.config.get("auto_save", False))
+        other_layout.addWidget(self.auto_save)
+        
+        layout.addWidget(other_group)
+        
+        # === 按钮 ===
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        save_btn.clicked.connect(self.save_settings)
+        btn_layout.addWidget(save_btn)
+        
+        layout.addLayout(btn_layout)
+        
+    def save_settings(self):
+        """保存设置"""
+        self.config["record_hotkey"] = self.record_hotkey.text() or "F6"
+        self.config["copy_hotkey"] = self.copy_hotkey.text() or "Ctrl+C"
+        self.config["auto_copy"] = self.auto_copy.isChecked()
+        self.config["auto_save"] = self.auto_save.isChecked()
+        self.accept()
+        
+    def get_config(self):
+        """获取配置"""
+        return self.config
 
 
 def main():
