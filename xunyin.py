@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 迅音 - 本地语音转文字工具
@@ -505,6 +505,11 @@ class XunYinWindow(QMainWindow):
         """开始录音"""
         self.record_btn.setText("录音中... 松开结束")
         self.status_bar.showMessage("正在录音，请说话...")
+        
+        # 更新悬浮窗状态为录音中（红色）
+        if hasattr(self, 'floating_indicator') and self.floating_indicator:
+            self.floating_indicator.set_status("recording")
+        
         self.recorder.start_recording()
         
         # 启动录音循环线程
@@ -527,6 +532,10 @@ class XunYinWindow(QMainWindow):
         self.record_btn.setText("按住说话")
         self.record_btn.setEnabled(False)
         self.status_bar.showMessage("正在识别，请稍候...")
+        
+        # 更新悬浮窗状态为完成（绿色）
+        if hasattr(self, 'floating_indicator') and self.floating_indicator:
+            self.floating_indicator.set_status("finished")
         
         # 停止录音并获取文件路径
         self.temp_file = self.recorder.stop_recording()
@@ -1076,3 +1085,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
