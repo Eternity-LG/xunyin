@@ -19,6 +19,8 @@ import pyaudio
 import whisper
 from scipy import signal
 from pynput import mouse, keyboard as pynput_keyboard
+from pynput.keyboard import Listener as KeyboardListener
+from pynput.mouse import Listener as MouseListener
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -381,6 +383,78 @@ class XunYinWindow(QMainWindow):
         # === 状态栏 ===
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("准备就绪，按住圆形按钮开始录音")
+        
+        # 启动全局热键监听
+        self.start_global_hotkey_listener()
+        
+    def start_global_hotkey_listener(self):
+        """启动全局热键监听"""
+        self.global_mouse_listener = None
+        self.is_recording_by_hotkey = False
+        
+        def on_mouse_click(x, y, button, pressed):
+            """监听鼠标侧键"""
+            record_hotkey = self.config.get("record_hotkey", "F6")
+            
+            # 检查是否是配置的鼠标快捷键
+            if record_hotkey == "MouseBack" and button == mouse.Button.x1:
+                if pressed:
+                    self.is_recording_by_hotkey = True
+                    self.start_recording()
+                else:
+                    if self.is_recording_by_hotkey:
+                        self.is_recording_by_hotkey = False
+                        self.stop_recording()
+                return True
+            elif record_hotkey == "MouseForward" and button == mouse.Button.x2:
+                if pressed:
+                    self.is_recording_by_hotkey = True
+                    self.start_recording()
+                else:
+                    if self.is_recording_by_hotkey:
+                        self.is_recording_by_hotkey = False
+                        self.stop_recording()
+                return True
+            return True
+            
+        def on_mouse_scroll(x, y, dx, dy):
+            """监听鼠标滚轮"""
+            record_hotkey = self.config.get("record_hotkey", "F6")
+            
+            if record_hotkey == "MouseScrollUp" and dy > 0:
+                # 滚轮作为开关（非长按）
+                if not self.is_recording:
+                    self.start_recording()
+                else:
+                    self.stop_recording()
+                return True
+            elif record_hotkey == "MouseScrollDown" and dy < 0:
+                if not self.is_recording:
+                    self.start_recording()
+                else:
+                    self.stop_recording()
+                return True
+            return True
+            
+        self.global_mouse_listener = MouseListener(
+            on_click=on_mouse_click,
+            on_scroll=on_mouse_scroll
+        )
+        self.global_mouse_listener.start()
+        
+    def stop_global_hotkey_listener(self):
+        """停止全局热键监听"""
+        if self.global_mouse_listener:
+            self.global_mouse_listener.stop()
+            self.global_mouse_listener = None
+        
+    def closeEvent(self, event):
+        """窗口关闭时清理"""
+        self.stop_global_hotkey_listener()
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.stop()
+            self.worker.wait()
+        event.accept()
         
     def apply_config(self):
         """应用配置"""
