@@ -18,6 +18,7 @@ import json
 import pyaudio
 import whisper
 from scipy import signal
+from pynput import mouse, keyboard as pynput_keyboard
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -25,6 +26,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QDialog, QLineEdit, QFormLayout,
     QCheckBox, QGroupBox
 )
+from PyQt6.QtCore import Qt
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
@@ -622,6 +624,151 @@ class XunYinWindow(QMainWindow):
         event.accept()
 
 
+class HotkeyLineEdit(QLineEdit):
+    """快捷键输入框 - 捕获键盘按键和鼠标侧键"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setPlaceholderText("点击此处，按下快捷键或鼠标侧键...")
+        self.current_hotkey = ""
+        self.mouse_listener = None
+        self.is_listening = False
+        
+    def focusInEvent(self, event):
+        """获得焦点时开始监听鼠标"""
+        super().focusInEvent(event)
+        self.start_mouse_listen()
+        
+    def focusOutEvent(self, event):
+        """失去焦点时停止监听鼠标"""
+        super().focusOutEvent(event)
+        self.stop_mouse_listen()
+        
+    def start_mouse_listen(self):
+        """开始监听鼠标侧键"""
+        if self.is_listening:
+            return
+        self.is_listening = True
+        self.setStyleSheet("background-color: #e3f2fd;")  # 蓝色背景提示正在监听
+        
+        def on_click(x, y, button, pressed):
+            if not pressed:
+                return True
+            # 鼠标侧键: button.x1 (后退), button.x2 (前进)
+            if button == mouse.Button.x1:
+                self.current_hotkey = "MouseBack"
+                self.setText("鼠标侧键-后退")
+                return True  # 继续监听，允许再次修改
+            elif button == mouse.Button.x2:
+                self.current_hotkey = "MouseForward"
+                self.setText("鼠标侧键-前进")
+                return True  # 继续监听，允许再次修改
+            return True
+            
+        def on_scroll(x, y, dx, dy):
+            if dy > 0:
+                self.current_hotkey = "MouseScrollUp"
+                self.setText("鼠标滚轮-上")
+            else:
+                self.current_hotkey = "MouseScrollDown"
+                self.setText("鼠标滚轮-下")
+            return True  # 继续监听，允许再次修改
+            
+        self.mouse_listener = mouse.Listener(
+            on_click=on_click,
+            on_scroll=on_scroll
+        )
+        self.mouse_listener.start()
+        
+    def stop_mouse_listen(self):
+        """停止监听鼠标"""
+        self.is_listening = False
+        self.setStyleSheet("")  # 恢复默认样式
+        if self.mouse_listener:
+            self.mouse_listener.stop()
+            self.mouse_listener = None
+        
+    def keyPressEvent(self, event):
+        """捕获按键"""
+        key = event.key()
+        
+        # 忽略单独的功能键
+        if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, 
+                   Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+            return
+            
+        # 构建快捷键字符串
+        modifiers = []
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            modifiers.append("Ctrl")
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            modifiers.append("Shift")
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            modifiers.append("Alt")
+        if event.modifiers() & Qt.KeyboardModifier.MetaModifier:
+            modifiers.append("Win")
+            
+        # 获取按键名称
+        key_name = Qt.Key(key).name.replace("Key_", "")
+        
+        # 特殊按键处理
+        special_keys = {
+            "Space": "Space",
+            "Return": "Enter",
+            "Escape": "Esc",
+            "Tab": "Tab",
+            "Backspace": "Backspace",
+            "Delete": "Delete",
+            "Insert": "Insert",
+            "Home": "Home",
+            "End": "End",
+            "PageUp": "PageUp",
+            "PageDown": "PageDown",
+            "Up": "Up",
+            "Down": "Down",
+            "Left": "Left",
+            "Right": "Right",
+        }
+        
+        if key_name in special_keys:
+            key_name = special_keys[key_name]
+        elif key_name.startswith("F") and key_name[1:].isdigit():
+            pass  # F1-F12 保持原样
+        elif len(key_name) == 1:
+            pass  # 字母数字保持原样
+        else:
+            key_name = key_name  # 其他按键
+            
+        # 组合快捷键
+        if modifiers:
+            self.current_hotkey = "+".join(modifiers + [key_name])
+        else:
+            self.current_hotkey = key_name
+            
+        self.setText(self.current_hotkey)
+        event.accept()
+        
+        # 键盘事件后继续监听鼠标（允许切换回鼠标快捷键）
+        if not self.is_listening:
+            self.start_mouse_listen()
+        
+    def get_hotkey(self):
+        """获取当前快捷键"""
+        return self.current_hotkey or self.text()
+        
+    def set_hotkey(self, hotkey):
+        """设置快捷键"""
+        self.current_hotkey = hotkey
+        # 转换显示名称
+        display_names = {
+            "MouseBack": "鼠标侧键-后退",
+            "MouseForward": "鼠标侧键-前进",
+            "MouseScrollUp": "鼠标滚轮-上",
+            "MouseScrollDown": "鼠标滚轮-下",
+        }
+        self.setText(display_names.get(hotkey, hotkey))
+
+
 class SettingsDialog(QDialog):
     """设置对话框"""
     def __init__(self, config, parent=None):
@@ -638,19 +785,17 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         
         # === 快捷键设置 ===
-        hotkey_group = QGroupBox("快捷键设置")
+        hotkey_group = QGroupBox("快捷键设置 (点击输入框，按下快捷键)")
         hotkey_layout = QFormLayout(hotkey_group)
         
         # 录音快捷键
-        self.record_hotkey = QLineEdit()
-        self.record_hotkey.setText(self.config.get("record_hotkey", "F6"))
-        self.record_hotkey.setPlaceholderText("例如: F6, Ctrl+Space")
+        self.record_hotkey = HotkeyLineEdit()
+        self.record_hotkey.set_hotkey(self.config.get("record_hotkey", "F6"))
         hotkey_layout.addRow("录音快捷键:", self.record_hotkey)
         
         # 复制快捷键
-        self.copy_hotkey = QLineEdit()
-        self.copy_hotkey.setText(self.config.get("copy_hotkey", "Ctrl+C"))
-        self.copy_hotkey.setPlaceholderText("例如: Ctrl+C, F7")
+        self.copy_hotkey = HotkeyLineEdit()
+        self.copy_hotkey.set_hotkey(self.config.get("copy_hotkey", "Ctrl+C"))
         hotkey_layout.addRow("复制结果快捷键:", self.copy_hotkey)
         
         layout.addWidget(hotkey_group)
@@ -688,8 +833,8 @@ class SettingsDialog(QDialog):
         
     def save_settings(self):
         """保存设置"""
-        self.config["record_hotkey"] = self.record_hotkey.text() or "F6"
-        self.config["copy_hotkey"] = self.copy_hotkey.text() or "Ctrl+C"
+        self.config["record_hotkey"] = self.record_hotkey.get_hotkey() or "F6"
+        self.config["copy_hotkey"] = self.copy_hotkey.get_hotkey() or "Ctrl+C"
         self.config["auto_copy"] = self.auto_copy.isChecked()
         self.config["auto_save"] = self.auto_save.isChecked()
         self.accept()
